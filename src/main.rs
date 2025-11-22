@@ -78,18 +78,22 @@ fn encode(img: &mut RgbaImage, message: &str) -> Result<(), String> {
     data_to_hide.extend_from_slice(&message_len_bytes);
     data_to_hide.extend_from_slice(message_bytes);
 
-    let mut bit_iter = data_to_hide.iter().flat_map(|&byte| (0..8).map(move |i| (byte >> i) & 1));
+    let mut bit_index = 0usize;
 
-    for y in 0..height {
-        for x in 0..width {
+    for &byte in &data_to_hide {
+        for bit_pos in 0..8 {
+            let bit = (byte >> bit_pos) & 1;
+
+            let pixel_index = bit_index / 3;
+            let channel_index = bit_index % 3;
+
+            let x = (pixel_index % width as usize) as u32;
+            let y = (pixel_index / width as usize) as u32;
+
             let pixel = img.get_pixel_mut(x, y);
-            for i in 0..3 {
-                if let Some(bit) = bit_iter.next() {
-                    pixel[i] = (pixel[i] & 0xFE) | bit;
-                } else {
-                    break;
-                }
-            }
+            pixel[channel_index] = (pixel[channel_index] & 0xFE) | bit;
+
+            bit_index += 1;
         }
     }
     
