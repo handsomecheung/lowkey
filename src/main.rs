@@ -69,7 +69,7 @@ fn encode(img: &mut RgbaImage, message: &str) -> Result<(), String> {
     let message_len = message_bytes.len() as u32;
     let message_len_bytes = message_len.to_be_bytes();
 
-    let total_capacity = (width * height * 3) / 8;
+    let total_capacity = (width * height * 4) / 8;
     if (message_len + 4) as u32 > total_capacity {
         return Err(format!("Message is too long for the image. Capacity: {} bytes", total_capacity));
     }
@@ -84,8 +84,8 @@ fn encode(img: &mut RgbaImage, message: &str) -> Result<(), String> {
         for bit_pos in 0..8 {
             let bit = (byte >> bit_pos) & 1;
 
-            let pixel_index = bit_index / 3;
-            let channel_index = bit_index % 3;
+            let pixel_index = bit_index / 4;
+            let channel_index = bit_index % 4;
 
             let x = (pixel_index % width as usize) as u32;
             let y = (pixel_index / width as usize) as u32;
@@ -110,7 +110,7 @@ fn decode(img: &RgbaImage) -> Result<String, String> {
     for y in 0..height {
         for x in 0..width {
             let pixel = img.get_pixel(x, y);
-            for i in 0..3 {
+            for i in 0..4 {
                 bits.push(pixel[i] & 1);
                 if !finished && bits.len() >= 32 {
                      let mut len_bytes = [0u8; 4];
