@@ -138,10 +138,10 @@ jobs:
 
             ```bash
             # Encode a message
-            lowkey encode input.jpg "secret message" output.png
+            lowkey encode --image input.jpg --message the/path/of/message/file --output encoded.png
 
             # Decode a message
-            lowkey decode output.png
+            lowkey decode --image encoded.png --outupt output.png
             ```
 
             ## Supported Platforms

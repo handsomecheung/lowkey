@@ -1,51 +1,55 @@
+use clap::{Parser, Subcommand};
 use image::RgbaImage;
 use png::{BitDepth, ColorType, Encoder};
-use std::env;
-use std::fs::File;
+use std::fs::{self, File};
 use std::io::{BufReader, BufWriter};
+use std::path::Path;
+
+#[derive(Parser)]
+#[command(name = "lowkey")]
+#[command(about = "LSB steganography tool for hiding messages in PNG images", long_about = None)]
+struct Cli {
+    #[command(subcommand)]
+    command: Commands,
+}
+
+#[derive(Subcommand)]
+enum Commands {
+    Encode {
+        #[arg(long)]
+        image: String,
+
+        #[arg(long)]
+        message: String,
+
+        #[arg(long)]
+        output: String,
+    },
+    Decode {
+        #[arg(long)]
+        image: String,
+
+        #[arg(long)]
+        output: String,
+    },
+}
 
 fn main() {
-    let args: Vec<String> = env::args().collect();
+    let cli = Cli::parse();
 
-    if args.len() < 2 {
-        println!("Usage: lowkey <command> [args]");
-        println!("Commands:");
-        println!("  encode <input_image> <message> <output_image>");
-        println!("  decode <image>");
-        return;
-    }
-
-    let command = &args[1];
-
-    match command.as_str() {
-        "encode" => {
-            if args.len() != 5 {
-                println!("Usage: lowkey encode <input_image> <message> <output_image>");
-                return;
-            }
-            let input_image = &args[2];
-            let message = &args[3];
-            let output_image = &args[4];
-            match encode_from_file(input_image, message, output_image) {
-                Ok(_) => println!("Encoded message into {}", output_image),
-                Err(e) => eprintln!("Error encoding message: {}", e),
-            }
-        }
-        "decode" => {
-            if args.len() != 3 {
-                println!("Usage: lowkey decode <image>");
-                return;
-            }
-            let image_path = &args[2];
-            match decode_from_file(image_path) {
-                Ok(message) => println!("Decoded message: {}", message),
-                Err(e) => eprintln!("Error decoding message: {}", e),
-            }
-        }
-        _ => {
-            println!("Unknown command: {}", command);
-            println!("Usage: lowkey <command> [args]");
-        }
+    match cli.command {
+        Commands::Encode {
+            image,
+            message,
+            output,
+        } => match encode_from_files(&image, &message, &output) {
+            Ok(_) => println!("Encoded message into {}", output),
+            Err(e) => eprintln!("Error encoding message: {}", e),
+        },
+        Commands::Decode { image, output } => match decode_to_file(&image, &output) {
+            Ok(_) => println!("Decoded message saved to {}", output),
+            Err(e) => eprintln!("Error decoding message: {}", e),
+        },
     }
 }
 
@@ -233,36 +237,64 @@ fn save_rgba_with_metadata(
     Ok(())
 }
 
-pub fn encode_from_file(
+pub fn encode_from_files(
     input_image: &str,
-    message: &str,
+    message_file: &str,
     output_image: &str,
 ) -> Result<(), String> {
+    use std::io::Read;
+
     let output_lower = output_image.to_lowercase();
     if output_lower.ends_with(".jpg") || output_lower.ends_with(".jpeg") {
         return Err("JPEG format is not supported for output. JPEG's lossy compression will destroy the hidden data. Please use PNG format instead.".to_string());
     }
 
+    let mut message_file_handle = File::open(message_file)
+        .map_err(|e| format!("Failed to open message file '{}': {}", message_file, e))?;
+    let mut message_bytes = Vec::new();
+    message_file_handle
+        .read_to_end(&mut message_bytes)
+        .map_err(|e| format!("Failed to read message file: {}", e))?;
+
     let mut img = image::open(input_image)
         .map_err(|e| e.to_string())?
         .to_rgba8();
 
-    encode(&mut img, message)?;
+    encode_bytes(&mut img, &message_bytes)?;
+
+    if let Some(parent) = Path::new(output_image).parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    }
 
     save_rgba_with_metadata(&img, output_image, input_image)?;
     Ok(())
 }
 
-pub fn decode_from_file(image_path: &str) -> Result<String, String> {
+pub fn decode_to_file(image_path: &str, output_file: &str) -> Result<(), String> {
+    use std::io::Write;
+
     let img = image::open(image_path)
         .map_err(|e| e.to_string())?
         .to_rgba8();
-    decode(&img)
+
+    let message_bytes = decode_bytes(&img)?;
+
+    if let Some(parent) = Path::new(output_file).parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    }
+
+    let mut file = File::create(output_file)
+        .map_err(|e| format!("Failed to create output file '{}': {}", output_file, e))?;
+    file.write_all(&message_bytes)
+        .map_err(|e| format!("Failed to write to output file: {}", e))?;
+
+    Ok(())
 }
 
-fn encode(img: &mut RgbaImage, message: &str) -> Result<(), String> {
+fn encode_bytes(img: &mut RgbaImage, message_bytes: &[u8]) -> Result<(), String> {
     let (width, height) = img.dimensions();
-    let message_bytes = message.as_bytes();
     let message_len = message_bytes.len() as u32;
     let message_len_bytes = message_len.to_be_bytes();
 
@@ -300,7 +332,7 @@ fn encode(img: &mut RgbaImage, message: &str) -> Result<(), String> {
     Ok(())
 }
 
-fn decode(img: &RgbaImage) -> Result<String, String> {
+fn decode_bytes(img: &RgbaImage) -> Result<Vec<u8>, String> {
     let (width, height) = img.dimensions();
 
     let mut bits = Vec::new();
@@ -338,7 +370,7 @@ fn decode(img: &RgbaImage) -> Result<String, String> {
                             break;
                         }
                     }
-                    return String::from_utf8(message_bytes).map_err(|e| e.to_string());
+                    return Ok(message_bytes);
                 }
             }
         }
@@ -357,8 +389,9 @@ mod tests {
         let mut img = RgbaImage::new(100, 100);
         let message = "This is a secret message.";
 
-        encode(&mut img, message).unwrap();
-        let decoded_message = decode(&img).unwrap();
+        encode_bytes(&mut img, message.as_bytes()).unwrap();
+        let decoded_bytes = decode_bytes(&img).unwrap();
+        let decoded_message = String::from_utf8(decoded_bytes).unwrap();
 
         assert_eq!(message, decoded_message);
     }
@@ -367,7 +400,7 @@ mod tests {
     fn test_message_too_long() {
         let mut img = RgbaImage::new(1, 1);
         let message = "This message is definitely too long.";
-        let result = encode(&mut img, message);
+        let result = encode_bytes(&mut img, message.as_bytes());
         assert!(result.is_err());
     }
 
@@ -375,8 +408,9 @@ mod tests {
     fn test_empty_message() {
         let mut img = RgbaImage::new(100, 100);
         let message = "";
-        encode(&mut img, message).unwrap();
-        let decoded_message = decode(&img).unwrap();
+        encode_bytes(&mut img, message.as_bytes()).unwrap();
+        let decoded_bytes = decode_bytes(&img).unwrap();
+        let decoded_message = String::from_utf8(decoded_bytes).unwrap();
         assert_eq!(message, decoded_message);
     }
 }
