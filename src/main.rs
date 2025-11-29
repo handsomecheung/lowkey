@@ -232,6 +232,23 @@ fn crc32(data: &[u8]) -> u32 {
     !crc
 }
 
+/// Save RGBA image as PNG without metadata preservation.
+fn save_rgba_simple(img: &RgbaImage, output_path: &str) -> Result<(), String> {
+    let output_file = File::create(output_path).map_err(|e| e.to_string())?;
+    let output_writer = BufWriter::new(output_file);
+    let (width, height) = img.dimensions();
+    let mut encoder = Encoder::new(output_writer, width, height);
+    encoder.set_color(ColorType::Rgba);
+    encoder.set_depth(BitDepth::Eight);
+
+    let mut writer = encoder.write_header().map_err(|e| e.to_string())?;
+    writer
+        .write_image_data(img.as_raw())
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 /// Save RGBA image with all PNG metadata chunks preserved from the original file.
 ///
 /// # Why preserve metadata?
@@ -277,7 +294,21 @@ fn save_rgba_with_metadata(
 ) -> Result<(), String> {
     use std::io::{Read, Write};
 
-    // Step 1: Extract metadata chunks from original file
+    // Check if input file is PNG by reading signature
+    let input_file = File::open(input_path).map_err(|e| e.to_string())?;
+    let mut input_reader = BufReader::new(input_file);
+
+    let mut signature = [0u8; 8];
+    let png_signature: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+
+    // Try to read signature
+    if input_reader.read_exact(&mut signature).is_err() || signature != png_signature {
+        // Not a PNG file, just save without metadata preservation
+        drop(input_reader);
+        return save_rgba_simple(img, output_path);
+    }
+
+    // Step 1: Extract metadata chunks from original PNG file
     let input_file = File::open(input_path).map_err(|e| e.to_string())?;
     let mut input_reader = BufReader::new(input_file);
 
