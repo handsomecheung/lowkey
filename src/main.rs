@@ -19,14 +19,28 @@ enum Commands {
         #[arg(long, default_value = "default")]
         variant: String,
 
+        /// Single input image (mutually exclusive with --image-list and --image-dir)
         #[arg(long)]
-        image: String,
+        image: Option<String>,
+
+        /// Multiple input images (space-separated)
+        #[arg(long, num_args = 1..)]
+        image_list: Option<Vec<String>>,
+
+        /// Directory containing input images
+        #[arg(long)]
+        image_dir: Option<String>,
 
         #[arg(long)]
         message: String,
 
+        /// Single output image (used with --image)
         #[arg(long)]
-        output: String,
+        output: Option<String>,
+
+        /// Output directory (used with --image-list or --image-dir)
+        #[arg(long)]
+        output_dir: Option<String>,
 
         #[arg(long, default_value = "false")]
         auto_resize: bool,
@@ -35,8 +49,17 @@ enum Commands {
         #[arg(long, default_value = "default")]
         variant: String,
 
+        /// Single input image (mutually exclusive with --image-list and --image-dir)
         #[arg(long)]
-        image: String,
+        image: Option<String>,
+
+        /// Multiple input images (space-separated)
+        #[arg(long, num_args = 1..)]
+        image_list: Option<Vec<String>>,
+
+        /// Directory containing input images
+        #[arg(long)]
+        image_dir: Option<String>,
 
         #[arg(long)]
         output: String,
@@ -50,21 +73,125 @@ fn main() {
         Commands::Encode {
             variant,
             image,
+            image_list,
+            image_dir,
             message,
             output,
+            output_dir,
             auto_resize,
-        } => match encode_from_files(&variant, &image, &message, &output, auto_resize) {
-            Ok(_) => println!("Encoded message into {}", output),
-            Err(e) => eprintln!("Error encoding message: {}", e),
-        },
+        } => {
+            // Validate mutually exclusive image parameters
+            let image_param_count = [image.is_some(), image_list.is_some(), image_dir.is_some()]
+                .iter()
+                .filter(|&&x| x)
+                .count();
+
+            if image_param_count == 0 {
+                eprintln!("Error: Must specify one of --image, --image-list, or --image-dir");
+                std::process::exit(1);
+            }
+
+            if image_param_count > 1 {
+                eprintln!("Error: Only one of --image, --image-list, or --image-dir can be specified");
+                std::process::exit(1);
+            }
+
+            // Validate output parameters
+            if image.is_some() {
+                if output.is_none() {
+                    eprintln!("Error: --output is required when using --image");
+                    std::process::exit(1);
+                }
+                if output_dir.is_some() {
+                    eprintln!("Error: --output-dir cannot be used with --image (use --output instead)");
+                    std::process::exit(1);
+                }
+            } else {
+                if output_dir.is_none() {
+                    eprintln!("Error: --output-dir is required when using --image-list or --image-dir");
+                    std::process::exit(1);
+                }
+                if output.is_some() {
+                    eprintln!("Error: --output cannot be used with --image-list or --image-dir (use --output-dir instead)");
+                    std::process::exit(1);
+                }
+            }
+
+            // Execute encoding based on parameters
+            let result = if let Some(single_image) = &image {
+                encode_from_files(&variant, single_image, &message, output.as_ref().unwrap(), auto_resize)
+            } else if let Some(images) = &image_list {
+                encode_from_multiple_files(&variant, images, &message, output_dir.as_ref().unwrap(), auto_resize)
+            } else if let Some(dir) = &image_dir {
+                let images = match collect_images_from_dir(dir) {
+                    Ok(imgs) => imgs,
+                    Err(e) => {
+                        eprintln!("Error reading image directory: {}", e);
+                        std::process::exit(1);
+                    }
+                };
+                encode_from_multiple_files(&variant, &images, &message, output_dir.as_ref().unwrap(), auto_resize)
+            } else {
+                unreachable!()
+            };
+
+            match result {
+                Ok(_) => {
+                    if let Some(out) = &output {
+                        println!("Encoded message into {}", out);
+                    } else if let Some(out_dir) = &output_dir {
+                        println!("Encoded message into output directory {}", out_dir);
+                    }
+                }
+                Err(e) => eprintln!("Error encoding message: {}", e),
+            }
+        }
         Commands::Decode {
             variant,
             image,
+            image_list,
+            image_dir,
             output,
-        } => match decode_to_file(&variant, &image, &output) {
-            Ok(_) => println!("Decoded message saved to {}", output),
-            Err(e) => eprintln!("Error decoding message: {}", e),
-        },
+        } => {
+            // Validate mutually exclusive image parameters
+            let image_param_count = [image.is_some(), image_list.is_some(), image_dir.is_some()]
+                .iter()
+                .filter(|&&x| x)
+                .count();
+
+            if image_param_count == 0 {
+                eprintln!("Error: Must specify one of --image, --image-list, or --image-dir");
+                std::process::exit(1);
+            }
+
+            if image_param_count > 1 {
+                eprintln!("Error: Only one of --image, --image-list, or --image-dir can be specified");
+                std::process::exit(1);
+            }
+
+            // Execute decoding based on parameters
+            let result = if let Some(single_image) = &image {
+                decode_to_file(&variant, single_image, &output)
+            } else if let Some(images) = &image_list {
+                decode_from_multiple_files(&variant, images, &output)
+            } else if let Some(dir) = &image_dir {
+                let images = match collect_images_from_dir(dir) {
+                    Ok(imgs) => imgs,
+                    Err(e) => {
+                        eprintln!("Error reading image directory: {}", e);
+                        std::process::exit(1);
+                    }
+                };
+                decode_from_multiple_files(&variant, &images, &output)
+            } else {
+                unreachable!()
+            };
+
+            match result {
+                Ok(_) => println!("Decoded message saved to {}", output),
+                Err(e) => eprintln!("Error decoding message: {}", e),
+            }
+        }
     }
 }
 
@@ -316,6 +443,132 @@ pub fn encode_from_files(
     Ok(())
 }
 
+/// Encode message from file into multiple images.
+pub fn encode_from_multiple_files(
+    variant: &str,
+    input_images: &[String],
+    message_file: &str,
+    output_dir: &str,
+    auto_resize: bool,
+) -> Result<(), String> {
+    use std::io::Read;
+
+    if variant != "default" {
+        return Err("invalid variant".to_string());
+    }
+
+    if input_images.is_empty() {
+        return Err("No input images provided".to_string());
+    }
+
+    // Read message
+    let mut message_file_handle = File::open(message_file)
+        .map_err(|e| format!("Failed to open message file '{}': {}", message_file, e))?;
+    let mut message_bytes = Vec::new();
+    message_file_handle
+        .read_to_end(&mut message_bytes)
+        .map_err(|e| format!("Failed to read message file: {}", e))?;
+
+    // Load all images
+    let mut images: Vec<(String, RgbaImage)> = Vec::new();
+    for img_path in input_images {
+        let img = image::open(img_path)
+            .map_err(|e| format!("Failed to open image '{}': {}", img_path, e))?
+            .to_rgba8();
+        images.push((img_path.clone(), img));
+    }
+
+    if auto_resize {
+        return Err("--auto-resize is not supported with multiple images".to_string());
+    }
+
+    // Calculate total capacity across all images
+    let total_capacity: u32 = images
+        .iter()
+        .map(|(_, img)| {
+            let (width, height) = img.dimensions();
+            (width * height * 4) / 8
+        })
+        .sum();
+
+    let message_len = message_bytes.len() as u32;
+    if message_len + 4 > total_capacity {
+        return Err(format!(
+            "Message is too long for all images. Total capacity: {} bytes, message size: {} bytes",
+            total_capacity - 4,
+            message_len
+        ));
+    }
+
+    // Prepare data to encode: length prefix + message
+    let mut data_to_hide = Vec::new();
+    data_to_hide.extend_from_slice(&message_len.to_be_bytes());
+    data_to_hide.extend_from_slice(&message_bytes);
+
+    // Encode across multiple images
+    let mut bit_index = 0usize;
+    let mut current_image_idx = 0usize;
+
+    for &byte in &data_to_hide {
+        for bit_pos in 0..8 {
+            let bit = (byte >> bit_pos) & 1;
+
+            // Find which image and pixel this bit belongs to
+            while current_image_idx < images.len() {
+                let (_, img) = &mut images[current_image_idx];
+                let (width, height) = img.dimensions();
+                let image_capacity_bits = (width * height * 4) as usize;
+
+                if bit_index < image_capacity_bits {
+                    let pixel_index = bit_index / 4;
+                    let channel_index = bit_index % 4;
+
+                    let x = (pixel_index % width as usize) as u32;
+                    let y = (pixel_index / width as usize) as u32;
+
+                    let pixel = img.get_pixel_mut(x, y);
+                    pixel[channel_index] = (pixel[channel_index] & 0xFE) | bit;
+
+                    bit_index += 1;
+                    break;
+                } else {
+                    // Move to next image
+                    current_image_idx += 1;
+                    bit_index = 0;
+                }
+            }
+        }
+    }
+
+    // Create output directory
+    fs::create_dir_all(output_dir)
+        .map_err(|e| format!("Failed to create output directory: {}", e))?;
+
+    // Save all images
+    for (i, (input_path, img)) in images.iter().enumerate() {
+        let filename = Path::new(input_path)
+            .file_name()
+            .ok_or_else(|| format!("Invalid input path: {}", input_path))?;
+
+        // Ensure output is PNG
+        let mut output_filename = filename.to_string_lossy().to_string();
+        if output_filename.to_lowercase().ends_with(".jpg") || output_filename.to_lowercase().ends_with(".jpeg") {
+            // Replace extension with .png
+            if let Some(pos) = output_filename.rfind('.') {
+                output_filename = format!("{}.png", &output_filename[..pos]);
+            }
+        }
+
+        let output_path = Path::new(output_dir).join(&output_filename);
+        let output_path_str = output_path.to_string_lossy().to_string();
+
+        save_rgba_with_metadata(img, &output_path_str, input_path)?;
+        println!("Saved encoded image {}/{}: {}", i + 1, images.len(), output_path_str);
+    }
+
+    Ok(())
+}
+
 pub fn decode_to_file(variant: &str, image_path: &str, output_file: &str) -> Result<(), String> {
     use std::io::Write;
 
@@ -336,6 +589,99 @@ pub fn decode_to_file(variant: &str, image_path: &str, output_file: &str) -> Res
             .map_err(|e| format!("Failed to create output directory: {}", e))?;
     }
 
+    let mut file = File::create(output_file)
+        .map_err(|e| format!("Failed to create output file '{}': {}", output_file, e))?;
+    file.write_all(&message_bytes)
+        .map_err(|e| format!("Failed to write to output file: {}", e))?;
+
+    Ok(())
+}
+
+/// Decode message from multiple images to file.
+pub fn decode_from_multiple_files(
+    variant: &str,
+    image_paths: &[String],
+    output_file: &str,
+) -> Result<(), String> {
+    use std::io::Write;
+
+    if variant != "default" {
+        return Err("invalid variant".to_string());
+    }
+
+    if image_paths.is_empty() {
+        return Err("No input images provided".to_string());
+    }
+
+    // Load all images
+    let mut images: Vec<RgbaImage> = Vec::new();
+    for img_path in image_paths {
+        let img = image::open(img_path)
+            .map_err(|e| format!("Failed to open image '{}': {}", img_path, e))?
+            .to_rgba8();
+        images.push(img);
+    }
+
+    // Extract bits from all images
+    let mut bits = Vec::new();
+    for img in &images {
+        let (width, height) = img.dimensions();
+        for y in 0..height {
+            for x in 0..width {
+                let pixel = img.get_pixel(x, y);
+                for i in 0..4 {
+                    bits.push(pixel[i] & 1);
+                }
+            }
+        }
+    }
+
+    // Decode message length from first 32 bits
+    if bits.len() < 32 {
+        return Err("Not enough data in images to decode message length".to_string());
+    }
+
+    let mut len_bytes = [0u8; 4];
+    for i in 0..4 {
+        let mut byte = 0u8;
+        for j in 0..8 {
+            byte |= bits[i * 8 + j] << j;
+        }
+        len_bytes[i] = byte;
+    }
+    let byte_count = u32::from_be_bytes(len_bytes) as usize;
+
+    // Check if we have enough bits for the message
+    let required_bits = 32 + (byte_count * 8);
+    if bits.len() < required_bits {
+        return Err(format!(
+            "Not enough data in images. Required: {} bits, available: {} bits",
+            required_bits,
+            bits.len()
+        ));
+    }
+
+    // Decode message bytes
+    let mut message_bytes = Vec::new();
+    let message_bits = &bits[32..];
+    for chunk in message_bits.chunks(8) {
+        let mut byte = 0u8;
+        for (i, &bit) in chunk.iter().enumerate() {
+            byte |= bit << i;
+        }
+        message_bytes.push(byte);
+        if message_bytes.len() >= byte_count {
+            break;
+        }
+    }
+
+    // Create output directory if needed
+    if let Some(parent) = Path::new(output_file).parent() {
+        fs::create_dir_all(parent)
+            .map_err(|e| format!("Failed to create output directory: {}", e))?;
+    }
+
+    // Write to file
     let mut file = File::create(output_file)
         .map_err(|e| format!("Failed to create output file '{}': {}", output_file, e))?;
     file.write_all(&message_bytes)
@@ -430,6 +776,40 @@ fn decode_bytes_v0(img: &RgbaImage) -> Result<Vec<u8>, String> {
     }
 
     Err("Could not decode message from image.".to_string())
+}
+
+/// Collect all image files from a directory, sorted by filename.
+fn collect_images_from_dir(dir: &str) -> Result<Vec<String>, String> {
+    let path = Path::new(dir);
+    if !path.is_dir() {
+        return Err(format!("'{}' is not a directory", dir));
+    }
+
+    let entries = fs::read_dir(path)
+        .map_err(|e| format!("Failed to read directory '{}': {}", dir, e))?;
+
+    let mut image_files = Vec::new();
+    for entry in entries {
+        let entry = entry.map_err(|e| format!("Failed to read directory entry: {}", e))?;
+        let path = entry.path();
+
+        if path.is_file() {
+            if let Some(ext) = path.extension() {
+                let ext_str = ext.to_string_lossy().to_lowercase();
+                if ext_str == "png" || ext_str == "jpg" || ext_str == "jpeg" {
+                    image_files.push(path.to_string_lossy().to_string());
+                }
+            }
+        }
+    }
+
+    if image_files.is_empty() {
+        return Err(format!("No image files found in directory '{}'", dir));
+    }
+
+    // Sort by filename to ensure consistent ordering
+    image_files.sort();
+    Ok(image_files)
 }
 
 /// Calculate the optimal dimensions for an image to fit a message of given size.
