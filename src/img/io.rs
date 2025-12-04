@@ -7,7 +7,6 @@ use std::io::{BufReader, BufWriter};
 use std::path::Path;
 
 pub fn read_image(path: &str) -> Result<ImageBuffer<image::Rgba<u8>, Vec<u8>>, String> {
-    // Read any image format - JPEG inputs are fine, they get converted to RGBA
     let img = image::open(path)
         .map_err(|e| format!("Failed to open image '{}': {}", path, e))?
         .to_rgba8();
@@ -126,6 +125,7 @@ pub fn save_rgba_with_metadata(
     img: &RgbaImage,
     output_path: &str,
     input_path: &str,
+    sequence_info: Option<(u32, u32)>,
 ) -> Result<(), String> {
     use std::io::{Read, Write};
 
@@ -237,12 +237,85 @@ pub fn save_rgba_with_metadata(
         chunk.write(&mut output_writer).map_err(|e| e.to_string())?;
     }
 
+    if let Some((index, total)) = sequence_info {
+        let mut sequence_data = Vec::new();
+        sequence_data.extend_from_slice(&index.to_be_bytes());
+        sequence_data.extend_from_slice(&total.to_be_bytes());
+
+        let sequence_chunk = PngChunk {
+            chunk_type: *b"lKsq", // lowkey sequence chunk
+            data: sequence_data,
+        };
+        sequence_chunk
+            .write(&mut output_writer)
+            .map_err(|e| e.to_string())?;
+    }
+
     // Write remaining chunks (IDAT and IEND)
     output_writer
         .write_all(&temp_buffer[pos..])
         .map_err(|e| e.to_string())?;
 
     Ok(())
+}
+
+/// Read sequence information from PNG metadata.
+///
+/// Returns Some((current_index, total_count)) if the lKsq chunk exists,
+/// otherwise returns None.
+pub fn read_sequence_info(image_path: &str) -> Result<Option<(u32, u32)>, String> {
+    use std::io::Read;
+
+    let input_file = File::open(image_path).map_err(|e| e.to_string())?;
+    let mut input_reader = BufReader::new(input_file);
+
+    let mut signature = [0u8; 8];
+    let png_signature: [u8; 8] = [137, 80, 78, 71, 13, 10, 26, 10];
+
+    // Check if it's a PNG file
+    if input_reader.read_exact(&mut signature).is_err() || signature != png_signature {
+        return Ok(None);
+    }
+
+    // Read chunks to find lKsq
+    loop {
+        let mut length_bytes = [0u8; 4];
+        if input_reader.read_exact(&mut length_bytes).is_err() {
+            break;
+        }
+        let length = u32::from_be_bytes(length_bytes) as usize;
+
+        let mut chunk_type = [0u8; 4];
+        if input_reader.read_exact(&mut chunk_type).is_err() {
+            break;
+        }
+
+        let mut chunk_data = vec![0u8; length];
+        if input_reader.read_exact(&mut chunk_data).is_err() {
+            break;
+        }
+
+        let mut _crc = [0u8; 4];
+        if input_reader.read_exact(&mut _crc).is_err() {
+            break;
+        }
+
+        // Check for lKsq chunk
+        if &chunk_type == b"lKsq" && chunk_data.len() == 8 {
+            let index =
+                u32::from_be_bytes([chunk_data[0], chunk_data[1], chunk_data[2], chunk_data[3]]);
+            let total =
+                u32::from_be_bytes([chunk_data[4], chunk_data[5], chunk_data[6], chunk_data[7]]);
+            return Ok(Some((index, total)));
+        }
+
+        // Stop at IEND
+        if &chunk_type == b"IEND" {
+            break;
+        }
+    }
+
+    Ok(None)
 }
 
 /// Save RGBA image as PNG without metadata preservation.

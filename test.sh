@@ -281,6 +281,50 @@ else
     print_fail "Invalid directory not handled"
 fi
 
+print_section "Test 9: Sequence metadata - renamed files"
+print_test "Creating large message requiring multiple images"
+# Create 50KB message to ensure it spans multiple 200x200 images (each can hold ~19.5KB)
+dd if=/dev/urandom of=test/tmp/messages/multi_image.txt bs=1024 count=50 2>/dev/null
+
+print_test "Encoding message into multiple images"
+if cargo run --quiet -- encode \
+    --image-list test/tmp/images/01.png test/tmp/images/02.png test/tmp/images/03.png \
+    --message test/tmp/messages/multi_image.txt \
+    --output-dir test/tmp/output_list/seq_test 2>&1 >/dev/null; then
+
+    if [ -f test/tmp/output_list/seq_test/01.png ] && [ -f test/tmp/output_list/seq_test/02.png ] && [ -f test/tmp/output_list/seq_test/03.png ]; then
+        print_pass "Multiple images encoded with sequence metadata"
+
+        print_test "Renaming files to random names"
+        mkdir -p test/tmp/output_list/renamed
+        cp test/tmp/output_list/seq_test/01.png test/tmp/output_list/renamed/zebra.png
+        cp test/tmp/output_list/seq_test/02.png test/tmp/output_list/renamed/apple.png
+        cp test/tmp/output_list/seq_test/03.png test/tmp/output_list/renamed/mango.png
+
+        print_test "Decoding from renamed files (alphabetically wrong order)"
+        if cargo run --quiet -- decode \
+            --image-list test/tmp/output_list/renamed/zebra.png test/tmp/output_list/renamed/mango.png test/tmp/output_list/renamed/apple.png \
+            --output test/tmp/output_list/renamed/decoded.txt 2>&1 >/dev/null; then
+
+            if [ -f test/tmp/output_list/renamed/decoded.txt ]; then
+                if diff -q test/tmp/messages/multi_image.txt test/tmp/output_list/renamed/decoded.txt >/dev/null 2>&1; then
+                    print_pass "Sequence metadata allows correct decoding despite file renaming"
+                else
+                    print_fail "Decoded message does not match original after file renaming"
+                fi
+            else
+                print_fail "Decoding renamed files failed - output file not created"
+            fi
+        else
+            print_fail "Decoding renamed files command failed"
+        fi
+    else
+        print_fail "Multiple images encoding with sequence metadata failed - output files not created"
+    fi
+else
+    print_fail "Multiple images encoding with sequence metadata command failed"
+fi
+
 print_section "Test Summary"
 TOTAL_TESTS=$((TESTS_PASSED + TESTS_FAILED))
 echo "Total tests: $TOTAL_TESTS"

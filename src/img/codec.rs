@@ -6,7 +6,7 @@ use std::io::Write;
 use std::path::Path;
 
 use super::common::{check_capacity_images, check_image_png, convert_bytes_to_bits};
-use super::io::{read_image, save_rgba_with_metadata};
+use super::io::{read_image, read_sequence_info, save_rgba_with_metadata};
 use super::pixel::{get_bits_reader_images, read_bits, set_bits_image};
 use super::resize::resize_image;
 
@@ -39,7 +39,7 @@ pub fn encode_from_file(
             .map_err(|e| format!("Failed to create output directory: {}", e))?;
     }
 
-    save_rgba_with_metadata(&img, output_image, input_image)?;
+    save_rgba_with_metadata(&img, output_image, input_image, None)?;
 
     Ok(())
 }
@@ -109,7 +109,8 @@ pub fn encode_from_files(
         let output_path = Path::new(output_dir).join(&output_filename);
         let output_path_str = output_path.to_string_lossy().to_string();
 
-        save_rgba_with_metadata(&img, &output_path_str, image_path)?;
+        let sequence_info = Some((i as u32, images_count as u32));
+        save_rgba_with_metadata(&img, &output_path_str, image_path, sequence_info)?;
         println!(
             "Saved encoded image {}/{}: {}",
             i + 1,
@@ -126,8 +127,30 @@ pub fn decode_from_files(image_paths: &[String], output_file: &str) -> Result<()
         return Err("No input images provided".to_string());
     }
 
+    let mut paths_with_sequence: Vec<(String, Option<(u32, u32)>)> = image_paths
+        .iter()
+        .map(|path| {
+            let seq_info = read_sequence_info(path).unwrap_or(None);
+            (path.clone(), seq_info)
+        })
+        .collect();
+
+    let all_have_sequence = paths_with_sequence
+        .iter()
+        .all(|(_, seq_info)| seq_info.is_some());
+
+    if all_have_sequence {
+        paths_with_sequence.sort_by_key(|(_, seq_info)| seq_info.unwrap().0);
+        println!("Detected sequence information in PNG metadata, using automatic ordering");
+    }
+
+    let sorted_paths: Vec<String> = paths_with_sequence
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect();
+
     let mut images: Vec<RgbaImage> = Vec::new();
-    for image_path in image_paths {
+    for image_path in &sorted_paths {
         check_image_png(image_path)?;
         let img = image::open(image_path)
             .map_err(|e| format!("Failed to open image '{}': {}", image_path, e))?
