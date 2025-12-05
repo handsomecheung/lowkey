@@ -13,6 +13,8 @@ struct Cli {
     command: Commands,
 }
 
+const DEFAULT_KEY: &str = "lowkey is a steganography tool";
+
 #[derive(Subcommand)]
 enum Commands {
     Encode {
@@ -41,6 +43,10 @@ enum Commands {
 
         #[arg(long, default_value = "false")]
         auto_resize: bool,
+
+        /// Encryption key (any length, will be hashed with SHA256). If not specified, uses default key
+        #[arg(long, default_value = DEFAULT_KEY)]
+        key: String,
     },
     Decode {
         /// Single input image (mutually exclusive with --image-list and --image-dir)
@@ -57,6 +63,10 @@ enum Commands {
 
         #[arg(long)]
         output: String,
+
+        /// Encryption key (any length, will be hashed with SHA256). If not specified, uses default key
+        #[arg(long, default_value = DEFAULT_KEY)]
+        key: String,
     },
 }
 
@@ -72,6 +82,7 @@ fn main() {
             output,
             output_dir,
             auto_resize,
+            key,
         } => encode(
             image,
             image_list,
@@ -80,13 +91,15 @@ fn main() {
             output,
             output_dir,
             auto_resize,
+            key,
         ),
         Commands::Decode {
             image,
             image_list,
             image_dir,
             output,
-        } => decode(image, image_list, image_dir, output),
+            key,
+        } => decode(image, image_list, image_dir, output, key),
     };
 
     match result {
@@ -108,7 +121,12 @@ fn encode(
     output: Option<String>,
     output_dir: Option<String>,
     auto_resize: bool,
+    key: String,
 ) -> Result<String, String> {
+    if key.is_empty() {
+        return Err("Encryption key cannot be empty".into());
+    }
+
     let image_param_count = [image.is_some(), image_list.is_some(), image_dir.is_some()]
         .iter()
         .filter(|&&x| x)
@@ -148,12 +166,23 @@ fn encode(
             &message,
             output.as_ref().unwrap(),
             auto_resize,
+            &key,
         )
     } else if let Some(images) = &image_list {
-        encode_from_files(images, &message, output_dir.as_ref().unwrap())
+        encode_from_files(
+            images,
+            &message,
+            output_dir.as_ref().unwrap(),
+            &key,
+        )
     } else if let Some(dir) = &image_dir {
         match collect_images_from_dir(dir) {
-            Ok(images) => encode_from_files(&images, &message, output_dir.as_ref().unwrap()),
+            Ok(images) => encode_from_files(
+                &images,
+                &message,
+                output_dir.as_ref().unwrap(),
+                &key,
+            ),
             Err(e) => Err(e),
         }
     } else {
@@ -179,7 +208,12 @@ fn decode(
     image_list: Option<Vec<String>>,
     image_dir: Option<String>,
     output: String,
+    key: String,
 ) -> Result<String, String> {
+    if key.is_empty() {
+        return Err("Encryption key cannot be empty".into());
+    }
+
     let image_param_count = [image.is_some(), image_list.is_some(), image_dir.is_some()]
         .iter()
         .filter(|&&x| x)
@@ -204,6 +238,6 @@ fn decode(
         unreachable!()
     };
 
-    decode_from_files(&images, &output)?;
+    decode_from_files(&images, &output, &key)?;
     Ok(format!("Successfully decoded message to {}", output))
 }

@@ -20,6 +20,7 @@ pub fn encode_from_file(
     message_file: &str,
     output_image: &str,
     auto_resize: bool,
+    key: &str,
 ) -> Result<(), String> {
     check_image_png(output_image)?;
 
@@ -36,7 +37,7 @@ pub fn encode_from_file(
         img = resize_image(&mut img, message_bytes.len(), 600)?;
     }
 
-    let bits = get_message_bits(&message_bytes)?;
+    let bits = get_message_bits(&message_bytes, key)?;
     set_bits_image(&mut img, &bits)?;
 
     if let Some(parent) = Path::new(output_image).parent() {
@@ -53,6 +54,7 @@ pub fn encode_from_files(
     input_images: &[String],
     message_file: &str,
     output_dir: &str,
+    key: &str,
 ) -> Result<(), String> {
     if input_images.is_empty() {
         return Err("No input images provided".to_string());
@@ -73,7 +75,7 @@ pub fn encode_from_files(
     fs::create_dir_all(output_dir)
         .map_err(|e| format!("Failed to create output directory: {}", e))?;
 
-    let bits = get_message_bits(&message_bytes)?;
+    let bits = get_message_bits(&message_bytes, key)?;
 
     check_capacity_images(
         &images.iter().map(|(_, img)| img).collect::<Vec<_>>(),
@@ -127,7 +129,11 @@ pub fn encode_from_files(
     Ok(())
 }
 
-pub fn decode_from_files(image_paths: &[String], output_file: &str) -> Result<(), String> {
+pub fn decode_from_files(
+    image_paths: &[String],
+    output_file: &str,
+    key: &str,
+) -> Result<(), String> {
     if image_paths.is_empty() {
         return Err("No input images provided".to_string());
     }
@@ -200,7 +206,7 @@ pub fn decode_from_files(image_paths: &[String], output_file: &str) -> Result<()
             .collect()
     };
 
-    let message_bytes = crypto::decrypt(&encrypted_bytes)?;
+    let message_bytes = crypto::decrypt(&encrypted_bytes, key)?;
 
     if let Some(parent) = Path::new(output_file).parent() {
         fs::create_dir_all(parent)
@@ -226,13 +232,13 @@ fn get_message_header_bytes(body_bytes: &[u8]) -> [u8; 5] {
     head
 }
 
-fn get_message_body_bytes(message_bytes: &[u8]) -> Result<Vec<u8>, String> {
-    let encrypted_bytes = crypto::encrypt(message_bytes)?;
+fn get_message_body_bytes(message_bytes: &[u8], key: &str) -> Result<Vec<u8>, String> {
+    let encrypted_bytes = crypto::encrypt(message_bytes, key)?;
     Ok(encrypted_bytes)
 }
 
-fn get_message_bits(message_bytes: &[u8]) -> Result<BitVec<u8, Lsb0>, String> {
-    let body_bytes = get_message_body_bytes(message_bytes)?;
+fn get_message_bits(message_bytes: &[u8], key: &str) -> Result<BitVec<u8, Lsb0>, String> {
+    let body_bytes = get_message_body_bytes(message_bytes, key)?;
     let header_bytes = get_message_header_bytes(&body_bytes);
 
     let mut data = Vec::new();

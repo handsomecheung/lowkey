@@ -9,3 +9,4 @@ png = "0.17"
 clap = { version = "4.5", features = ["derive"] }
 bitvec = "1.0"
 chacha20poly1305 = "0.10"
+sha2 = "0.10"

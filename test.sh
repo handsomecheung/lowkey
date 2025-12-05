@@ -325,6 +325,149 @@ else
     print_fail "Multiple images encoding with sequence metadata command failed"
 fi
 
+print_section "Test 10: Encryption key parameter"
+print_test "Encoding with custom key"
+if cargo run --quiet -- encode \
+    --image test/tmp/images/01.png \
+    --message test/tmp/messages/short.txt \
+    --output test/tmp/output_single/custom_key.png \
+    --key "my-secret-password" 2>&1 >/dev/null; then
+
+    if [ -f test/tmp/output_single/custom_key.png ]; then
+        print_pass "Encoding with custom key successful"
+    else
+        print_fail "Encoding with custom key failed - output file not created"
+    fi
+else
+    print_fail "Encoding with custom key command failed"
+fi
+
+print_test "Decoding with correct custom key"
+if cargo run --quiet -- decode \
+    --image test/tmp/output_single/custom_key.png \
+    --output test/tmp/output_single/custom_key_decoded.txt \
+    --key "my-secret-password" 2>&1 >/dev/null; then
+
+    if [ -f test/tmp/output_single/custom_key_decoded.txt ]; then
+        if diff -q test/tmp/messages/short.txt test/tmp/output_single/custom_key_decoded.txt >/dev/null 2>&1; then
+            print_pass "Decoding with correct custom key successful"
+        else
+            print_fail "Decoded message does not match original"
+        fi
+    else
+        print_fail "Decoding with correct custom key failed - output file not created"
+    fi
+else
+    print_fail "Decoding with correct custom key command failed"
+fi
+
+print_test "Decoding with wrong key (should fail)"
+OUTPUT=$(cargo run --quiet -- decode \
+    --image test/tmp/output_single/custom_key.png \
+    --output test/tmp/output_single/wrong_key_decoded.txt \
+    --key "wrong-password" 2>&1)
+
+if echo "$OUTPUT" | grep -q "Decryption failed"; then
+    print_pass "Decoding with wrong key correctly rejected"
+else
+    print_fail "Decoding with wrong key not rejected"
+fi
+
+print_test "Encoding with empty key (should fail)"
+OUTPUT=$(cargo run --quiet -- encode \
+    --image test/tmp/images/01.png \
+    --message test/tmp/messages/short.txt \
+    --output test/tmp/output_single/empty_key.png \
+    --key "" 2>&1)
+
+if echo "$OUTPUT" | grep -q "cannot be empty"; then
+    print_pass "Empty key correctly rejected for encoding"
+else
+    print_fail "Empty key not rejected for encoding"
+fi
+
+print_test "Decoding with empty key (should fail)"
+OUTPUT=$(cargo run --quiet -- decode \
+    --image test/tmp/output_single/encoded.png \
+    --output test/tmp/output_single/empty_key_decoded.txt \
+    --key "" 2>&1)
+
+if echo "$OUTPUT" | grep -q "cannot be empty"; then
+    print_pass "Empty key correctly rejected for decoding"
+else
+    print_fail "Empty key not rejected for decoding"
+fi
+
+print_test "Testing default key encode/decode"
+if cargo run --quiet -- encode \
+    --image test/tmp/images/01.png \
+    --message test/tmp/messages/short.txt \
+    --output test/tmp/output_single/default_key.png 2>&1 >/dev/null; then
+
+    if cargo run --quiet -- decode \
+        --image test/tmp/output_single/default_key.png \
+        --output test/tmp/output_single/default_key_decoded.txt 2>&1 >/dev/null; then
+
+        if diff -q test/tmp/messages/short.txt test/tmp/output_single/default_key_decoded.txt >/dev/null 2>&1; then
+            print_pass "Default key encode/decode works correctly"
+        else
+            print_fail "Default key decoded message does not match original"
+        fi
+    else
+        print_fail "Default key decoding failed"
+    fi
+else
+    print_fail "Default key encoding failed"
+fi
+
+print_test "Testing Unicode key (Chinese + emoji)"
+if cargo run --quiet -- encode \
+    --image test/tmp/images/01.png \
+    --message test/tmp/messages/short.txt \
+    --output test/tmp/output_single/unicode_key.png \
+    --key "MyKey🔐" 2>&1 >/dev/null; then
+
+    if cargo run --quiet -- decode \
+        --image test/tmp/output_single/unicode_key.png \
+        --output test/tmp/output_single/unicode_key_decoded.txt \
+        --key "MyKey🔐" 2>&1 >/dev/null; then
+
+        if diff -q test/tmp/messages/short.txt test/tmp/output_single/unicode_key_decoded.txt >/dev/null 2>&1; then
+            print_pass "Unicode key (Chinese + emoji) works correctly"
+        else
+            print_fail "Unicode key decoded message does not match original"
+        fi
+    else
+        print_fail "Unicode key decoding failed"
+    fi
+else
+    print_fail "Unicode key encoding failed"
+fi
+
+print_test "Testing multi-image with custom key"
+if cargo run --quiet -- encode \
+    --image-list test/tmp/images/01.png test/tmp/images/02.png \
+    --message test/tmp/messages/long.txt \
+    --output-dir test/tmp/output_list/custom_key \
+    --key "multi-image-secret" 2>&1 >/dev/null; then
+
+    if cargo run --quiet -- decode \
+        --image-dir test/tmp/output_list/custom_key \
+        --output test/tmp/output_list/custom_key/decoded.txt \
+        --key "multi-image-secret" 2>&1 >/dev/null; then
+
+        if diff -q test/tmp/messages/long.txt test/tmp/output_list/custom_key/decoded.txt >/dev/null 2>&1; then
+            print_pass "Multi-image with custom key works correctly"
+        else
+            print_fail "Multi-image custom key decoded message does not match original"
+        fi
+    else
+        print_fail "Multi-image custom key decoding failed"
+    fi
+else
+    print_fail "Multi-image custom key encoding failed"
+fi
+
 print_section "Test Summary"
 TOTAL_TESTS=$((TESTS_PASSED + TESTS_FAILED))
 echo "Total tests: $TOTAL_TESTS"
