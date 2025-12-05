@@ -116,7 +116,16 @@ jobs:
           body: |
             # lowkey ${{ github.ref_name }}
 
-            LSB steganography tool for hiding messages in PNG images.
+            LSB steganography tool for hiding encrypted messages in PNG images.
+
+            ## Features
+
+            - **ChaCha20-Poly1305 encryption**: All messages are encrypted with AEAD
+            - **Customizable keys**: Use your own password (any length, SHA256-hashed)
+            - **Multi-image support**: Split large messages across multiple images
+            - **PNG metadata preservation**: Maintains ICC profiles and other metadata
+            - **Auto-resize**: Automatically resize images to fit messages
+            - **Unicode support**: Keys can include emoji and international characters
 
             ## Installation
 
@@ -134,15 +143,32 @@ jobs:
             # Windows - just rename and run
             ```
 
-            ## Usage
+            ## Quick Start
 
             ```bash
-            # Encode a message
-            lowkey encode --image input.jpg --message the/path/of/message/file --output encoded.png
+            # Encode with default key
+            lowkey encode --image input.jpg --message message.txt --output encoded.png
 
-            # Decode a message
-            lowkey decode --image encoded.png --outupt output.png
+            # Decode with default key
+            lowkey decode --image encoded.png --output decoded.txt
+
+            # Use custom encryption key
+            lowkey encode --image input.jpg --message message.txt --output encoded.png --key "my-secret-password🔐"
+            lowkey decode --image encoded.png --output decoded.txt --key "my-secret-password🔐"
+
+            # Multi-image encoding
+            lowkey encode --image-list img1.jpg img2.png --message large.txt --output-dir ./output
+            lowkey decode --image-dir ./output --output decoded.txt
+
+            # Auto-resize if message is too large
+            lowkey encode --image small.jpg --message big.txt --output output.png --auto-resize
             ```
+
+            ## Important Notes
+
+            - **Output must be PNG**: JPEG output is not supported due to lossy compression
+            - **Remember your key**: Without the correct encryption key, messages cannot be recovered
+            - **Unicode keys supported**: You can use emoji and international characters in your password
 
             ## Supported Platforms
 
