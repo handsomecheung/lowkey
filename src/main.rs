@@ -1,5 +1,6 @@
 use clap::{Parser, Subcommand};
 
+mod crypto;
 mod img;
 use img::codec::{decode_from_files, encode_from_file, encode_from_files};
 use img::io::collect_images_from_dir;

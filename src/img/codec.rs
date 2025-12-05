@@ -9,6 +9,7 @@ use super::common::{check_capacity_images, check_image_png, convert_bytes_to_bit
 use super::io::{read_image, read_sequence_info, save_rgba_with_metadata};
 use super::pixel::{get_bits_reader_images, read_bits, set_bits_image};
 use super::resize::resize_image;
+use crate::crypto;
 
 pub fn encode_from_file(
     input_image: &str,
@@ -31,7 +32,7 @@ pub fn encode_from_file(
         img = resize_image(&mut img, message_bytes.len(), 600)?;
     }
 
-    let bits = get_message_bits(&message_bytes);
+    let bits = get_message_bits(&message_bytes)?;
     set_bits_image(&mut img, &bits)?;
 
     if let Some(parent) = Path::new(output_image).parent() {
@@ -68,7 +69,7 @@ pub fn encode_from_files(
     fs::create_dir_all(output_dir)
         .map_err(|e| format!("Failed to create output directory: {}", e))?;
 
-    let bits = get_message_bits(&message_bytes);
+    let bits = get_message_bits(&message_bytes)?;
 
     check_capacity_images(
         &images.iter().map(|(_, img)| img).collect::<Vec<_>>(),
@@ -170,7 +171,7 @@ pub fn decode_from_files(image_paths: &[String], output_file: &str) -> Result<()
         u32::from_be_bytes(len_bytes)
     };
 
-    let message_bytes: Vec<_> = {
+    let encrypted_bytes: Vec<_> = {
         let bits = read_bits(&mut reader, message_count as usize * 8)?;
         bits.chunks(8)
             .map(|chunk| {
@@ -181,6 +182,8 @@ pub fn decode_from_files(image_paths: &[String], output_file: &str) -> Result<()
             })
             .collect()
     };
+
+    let message_bytes = crypto::decrypt(&encrypted_bytes)?;
 
     if let Some(parent) = Path::new(output_file).parent() {
         fs::create_dir_all(parent)
@@ -195,13 +198,15 @@ pub fn decode_from_files(image_paths: &[String], output_file: &str) -> Result<()
     Ok(())
 }
 
-fn get_message_bits(message_bytes: &[u8]) -> BitVec<u8, Lsb0> {
-    let message_len = message_bytes.len() as u32;
+fn get_message_bits(message_bytes: &[u8]) -> Result<BitVec<u8, Lsb0>, String> {
+    let encrypted_bytes = crypto::encrypt(message_bytes)?;
+
+    let message_len = encrypted_bytes.len() as u32;
     let message_len_bytes = message_len.to_be_bytes();
 
     let mut data = Vec::new();
     data.extend_from_slice(&message_len_bytes);
-    data.extend_from_slice(message_bytes);
+    data.extend_from_slice(&encrypted_bytes);
 
-    convert_bytes_to_bits(&data)
+    Ok(convert_bytes_to_bits(&data))
 }
