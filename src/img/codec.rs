@@ -11,6 +11,10 @@ use super::pixel::{get_bits_reader_images, read_bits, set_bits_image};
 use super::resize::resize_image;
 use crate::crypto;
 
+/// Protocol version for the steganography format
+/// Version 0: [1 byte version] + [4 bytes message length] + [encrypted message data]
+const PROTOCOL_VERSION: u8 = 0;
+
 pub fn encode_from_file(
     input_image: &str,
     message_file: &str,
@@ -160,15 +164,28 @@ pub fn decode_from_files(image_paths: &[String], output_file: &str) -> Result<()
     }
 
     let mut reader = get_bits_reader_images(&images);
+
     let message_count = {
-        let header_count = 4;
+        let header_count = 5;
         let bits = read_bits(&mut reader, header_count * 8)?;
-        let len_bytes: [u8; 4] = std::array::from_fn(|i| {
+        let header_bytes: [u8; 5] = std::array::from_fn(|i| {
             (0..8).fold(0u8, |acc, j| {
                 acc | ((*bits.get(i * 8 + j).unwrap() as u8) << j)
             })
         });
-        u32::from_be_bytes(len_bytes)
+
+        let version = header_bytes[0];
+        let len_bytes: [u8; 4] = header_bytes[1..5].try_into().unwrap();
+        let count = u32::from_be_bytes(len_bytes);
+
+        if version != PROTOCOL_VERSION {
+            return Err(format!(
+                "Unsupported protocol version {}. Expected version {}",
+                version, PROTOCOL_VERSION
+            ));
+        }
+
+        count
     };
 
     let encrypted_bytes: Vec<_> = {
@@ -198,15 +215,29 @@ pub fn decode_from_files(image_paths: &[String], output_file: &str) -> Result<()
     Ok(())
 }
 
-fn get_message_bits(message_bytes: &[u8]) -> Result<BitVec<u8, Lsb0>, String> {
-    let encrypted_bytes = crypto::encrypt(message_bytes)?;
-
-    let message_len = encrypted_bytes.len() as u32;
+fn get_message_header_bytes(body_bytes: &[u8]) -> [u8; 5] {
+    let message_len = body_bytes.len() as u32;
     let message_len_bytes = message_len.to_be_bytes();
 
+    let mut head = [0u8; 5];
+    head[0] = PROTOCOL_VERSION;
+    head[1..5].copy_from_slice(&message_len_bytes);
+
+    head
+}
+
+fn get_message_body_bytes(message_bytes: &[u8]) -> Result<Vec<u8>, String> {
+    let encrypted_bytes = crypto::encrypt(message_bytes)?;
+    Ok(encrypted_bytes)
+}
+
+fn get_message_bits(message_bytes: &[u8]) -> Result<BitVec<u8, Lsb0>, String> {
+    let body_bytes = get_message_body_bytes(message_bytes)?;
+    let header_bytes = get_message_header_bytes(&body_bytes);
+
     let mut data = Vec::new();
-    data.extend_from_slice(&message_len_bytes);
-    data.extend_from_slice(&encrypted_bytes);
+    data.extend_from_slice(&header_bytes);
+    data.extend_from_slice(&body_bytes);
 
     Ok(convert_bytes_to_bits(&data))
 }

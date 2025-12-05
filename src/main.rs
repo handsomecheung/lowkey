@@ -16,9 +16,6 @@ struct Cli {
 #[derive(Subcommand)]
 enum Commands {
     Encode {
-        #[arg(long, default_value = "default")]
-        variant: String,
-
         /// Single input image (mutually exclusive with --image-list and --image-dir)
         #[arg(long)]
         image: Option<String>,
@@ -46,9 +43,6 @@ enum Commands {
         auto_resize: bool,
     },
     Decode {
-        #[arg(long, default_value = "default")]
-        variant: String,
-
         /// Single input image (mutually exclusive with --image-list and --image-dir)
         #[arg(long)]
         image: Option<String>,
@@ -71,7 +65,6 @@ fn main() {
 
     let result = match cli.command {
         Commands::Encode {
-            variant,
             image,
             image_list,
             image_dir,
@@ -79,34 +72,21 @@ fn main() {
             output,
             output_dir,
             auto_resize,
-        } => {
-            if variant != "default" {
-                Err("Invalid variant. Only 'default' is supported.".into())
-            } else {
-                encode(
-                    image,
-                    image_list,
-                    image_dir,
-                    message,
-                    output,
-                    output_dir,
-                    auto_resize,
-                )
-            }
-        }
+        } => encode(
+            image,
+            image_list,
+            image_dir,
+            message,
+            output,
+            output_dir,
+            auto_resize,
+        ),
         Commands::Decode {
-            variant,
             image,
             image_list,
             image_dir,
             output,
-        } => {
-            if variant != "default" {
-                Err("Invalid variant. Only 'default' is supported.".to_string())
-            } else {
-                decode(image, image_list, image_dir, output)
-            }
-        }
+        } => decode(image, image_list, image_dir, output),
     };
 
     match result {
