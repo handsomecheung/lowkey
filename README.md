@@ -27,6 +27,12 @@ cargo build --release
 
 The compiled binary will be available at `target/release/lowkey`.
 
+#### Build in container
+
+```bash
+bash ./script/build.sh
+```
+
 ## Usage
 
 ### Basic Operations
@@ -159,7 +165,13 @@ cargo test
 ### Run integration tests
 
 ```bash
-./test.sh
+bash ./tests/integration_test.sh
+```
+
+#### Test in container
+
+```bash
+bash ./script/test.sh
 ```
 
 ## Security Considerations
